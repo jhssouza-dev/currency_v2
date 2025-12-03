@@ -1,48 +1,10 @@
-import { useEffect, useState } from "react";
+// src/components/CurrencyConverter.tsx
 
-// Mapa moeda → país (FlagCDN)
-const currencyToCountry = {
-  AUD: "au",
-  EUR: "eu",
-  BGN: "bg",
-  BRL: "br",
-  CAD: "ca",
-  CHF: "ch",
-  CNY: "cn",
-  CZK: "cz",
-  DKK: "dk",
-  GBP: "gb",
-  HKD: "hk",
-  HUF: "hu",
-  IDR: "id",
-  ILS: "il",
-  INR: "in",
-  ISK: "is",
-  JPY: "jp",
-  KRW: "kr",
-  MXN: "mx",
-  MYR: "my",
-  NOK: "no",
-  NZD: "nz",
-  PHP: "ph",
-  PLN: "pl",
-  RON: "ro",
-  SEK: "se",
-  SGD: "sg",
-  THB: "th",
-  TRY: "tr",
-  USD: "us",
-  ZAR: "za",
-} as const;
+import { useEffect, useMemo, useState } from "react";
+import type { Currency, CurrencyCode } from "../utils/currencyUtils";
 
-type CurrencyCode = keyof typeof currencyToCountry;
-
-type CurrenciesApiResponse = Record<string, string>;
-
-type Currency = {
-  code: string;
-  name: string;
-};
+import { fetchCurrencies, convertCurrency } from "../services/currencyService";
+import { CurrencySelect } from "./CurrencySelect";
 
 export function CurrencyConverter() {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
@@ -51,28 +13,29 @@ export function CurrencyConverter() {
   const [toCurrency, setToCurrency] = useState<CurrencyCode>("USD");
   const [result, setResult] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [rate, setRate] = useState<number | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
-  const [isFromPickerOpen, setIsFromPickerOpen] = useState(false);
-  const [isToPickerOpen, setIsToPickerOpen] = useState(false);
+  // "from" | "to" | null
+  const [openPicker, setOpenPicker] = useState<"from" | "to" | null>(null);
 
   useEffect(() => {
-    async function loadCurrencies() {
-      const response = await fetch("https://api.frankfurter.app/currencies");
-      const data = (await response.json()) as CurrenciesApiResponse;
-      const list = Object.entries(data).map(([code, name]) => ({
-        code,
-        name,
-      }));
-      setCurrencies(list);
-    }
-
-    loadCurrencies();
+    fetchCurrencies()
+      .then(setCurrencies)
+      .catch(() => setError("Failed to load currencies"));
   }, []);
 
   useEffect(() => {
     setResult(null);
   }, [amount, fromCurrency, toCurrency]);
+
+  const rate = useMemo(() => {
+    if (result === null) return null;
+
+    const numericAmount = Number(amount);
+    if (!numericAmount) return null;
+
+    return result / numericAmount;
+  }, [result, amount]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -82,47 +45,53 @@ export function CurrencyConverter() {
       return;
     }
 
+    const numericAmount = Number(amount);
+
+    if (!numericAmount || numericAmount <= 0) {
+      setError("Enter a valid amount");
+      return;
+    }
+
     setError(null);
+    setIsConverting(true);
 
-    const response = await fetch(
-      `https://api.frankfurter.app/latest?amount=${amount}&from=${fromCurrency}&to=${toCurrency}`
-    );
-    const data = await response.json();
+    try {
+      const valueResult = await convertCurrency(
+        numericAmount,
+        fromCurrency,
+        toCurrency
+      );
 
-    const valueResult = data.rates[toCurrency];
-    setResult(valueResult);
-
-    const exchangeRate = valueResult / Number(amount);
-    setRate(exchangeRate);
+      setResult(valueResult);
+    } catch {
+      setError("Could not convert now. Try again.");
+    } finally {
+      setIsConverting(false);
+    }
   }
 
   function handleSwap() {
-    const temp = fromCurrency;
     setFromCurrency(toCurrency);
-    setToCurrency(temp);
+    setToCurrency(fromCurrency);
     setResult(null);
-    setRate(null);
   }
 
-  // Toggle dropdowns
   const toggleFromPicker = () => {
-    setIsFromPickerOpen((prev) => !prev);
-    setIsToPickerOpen(false);
+    setOpenPicker((prev) => (prev === "from" ? null : "from"));
   };
 
   const toggleToPicker = () => {
-    setIsToPickerOpen((prev) => !prev);
-    setIsFromPickerOpen(false);
+    setOpenPicker((prev) => (prev === "to" ? null : "to"));
   };
 
   function handleSelectFrom(code: CurrencyCode) {
     setFromCurrency(code);
-    setIsFromPickerOpen(false);
+    setOpenPicker(null);
   }
 
   function handleSelectTo(code: CurrencyCode) {
     setToCurrency(code);
-    setIsToPickerOpen(false);
+    setOpenPicker(null);
   }
 
   return (
@@ -161,67 +130,14 @@ export function CurrencyConverter() {
 
           {/* Selects de moedas */}
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.3fr)] gap-4 md:gap-3 items-end">
-            {/* FROM */}
-            <div className="space-y-1.5 relative">
-              <label className="text-xs font-medium text-slate-300 uppercase tracking-[0.12em]">
-                From
-              </label>
-
-              <button
-                type="button"
-                onClick={toggleFromPicker}
-                className="flex items-center gap-2 w-full justify-between h-12 rounded-2xl border border-slate-500/80 bg-slate-900/80 px-4 hover:bg-slate-900 hover:border-emerald-500/70 transition-colors"
-              >
-                <span className="flex items-center gap-2">
-                  <img
-                    src={`https://flagcdn.com/24x18/${currencyToCountry[fromCurrency]}.png`}
-                    className="w-6 h-4 rounded-sm object-cover"
-                    alt={fromCurrency}
-                  />
-                  <span className="font-semibold text-slate-50 tracking-wide text-sm">
-                    {fromCurrency}
-                  </span>
-                </span>
-                <span className="flex items-center justify-center w-7 h-7 rounded-full bg-slate-800 text-slate-100 text-lg">
-                  ▾
-                </span>
-              </button>
-
-              {isFromPickerOpen && (
-                <div className="absolute left-0 right-0 mt-2 rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl p-2 z-20">
-                  <div className="max-h-64 overflow-y-auto pr-1">
-                    {currencies.map((c) => (
-                      <button
-                        key={c.code}
-                        type="button"
-                        onClick={() =>
-                          handleSelectFrom(c.code as CurrencyCode)
-                        }
-                        className={`flex items-center gap-3 w-full px-3 py-2 rounded-xl text-left ${
-                          c.code === fromCurrency
-                            ? "bg-slate-800"
-                            : "hover:bg-slate-800/80"
-                        }`}
-                      >
-                        <img
-                          src={`https://flagcdn.com/24x18/${currencyToCountry[c.code as CurrencyCode]}.png`}
-                          className="w-6 h-4 rounded-sm object-cover"
-                          alt={c.code}
-                        />
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-50 leading-tight text-sm">
-                            {c.code}
-                          </span>
-                          <span className="text-slate-400 text-xs truncate">
-                            {c.name}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <CurrencySelect
+              label="From"
+              selected={fromCurrency}
+              currencies={currencies}
+              isOpen={openPicker === "from"}
+              onToggle={toggleFromPicker}
+              onSelect={handleSelectFrom}
+            />
 
             {/* Botão de Swap */}
             <div className="flex justify-center md:pb-1">
@@ -234,74 +150,23 @@ export function CurrencyConverter() {
               </button>
             </div>
 
-            {/* TO */}
-            <div className="space-y-1.5 relative">
-              <label className="text-xs font-medium text-slate-300 uppercase tracking-[0.12em]">
-                To
-              </label>
-
-              <button
-                type="button"
-                onClick={toggleToPicker}
-                className="flex items-center gap-2 w-full justify-between h-12 rounded-2xl border border-slate-500/80 bg-slate-900/80 px-4 hover:bg-slate-900 hover:border-emerald-500/70 transition-colors"
-              >
-                <span className="flex items-center gap-2">
-                  <img
-                    src={`https://flagcdn.com/24x18/${currencyToCountry[toCurrency]}.png`}
-                    className="w-6 h-4 rounded-sm object-cover"
-                    alt={toCurrency}
-                  />
-                  <span className="font-semibold text-slate-50 tracking-wide text-sm">
-                    {toCurrency}
-                  </span>
-                </span>
-                <span className="flex items-center justify-center w-7 h-7 rounded-full bg-slate-800 text-slate-100 text-lg">
-                  ▾
-                </span>
-              </button>
-
-              {isToPickerOpen && (
-                <div className="absolute left-0 right-0 mt-2 rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl p-2 z-20">
-                  <div className="max-h-64 overflow-y-auto pr-1">
-                    {currencies.map((c) => (
-                      <button
-                        key={c.code}
-                        type="button"
-                        onClick={() => handleSelectTo(c.code as CurrencyCode)}
-                        className={`flex items-center gap-3 w-full px-3 py-2 rounded-xl text-left ${
-                          c.code === toCurrency
-                            ? "bg-slate-800"
-                            : "hover:bg-slate-800/80"
-                        }`}
-                      >
-                        <img
-                          src={`https://flagcdn.com/24x18/${currencyToCountry[c.code as CurrencyCode]}.png`}
-                          className="w-6 h-4 rounded-sm object-cover"
-                          alt={c.code}
-                        />
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-50 leading-tight text-sm">
-                            {c.code}
-                          </span>
-                          <span className="text-slate-400 text-xs truncate">
-                            {c.name}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <CurrencySelect
+              label="To"
+              selected={toCurrency}
+              currencies={currencies}
+              isOpen={openPicker === "to"}
+              onToggle={toggleToPicker}
+              onSelect={handleSelectTo}
+            />
           </div>
 
           {/* Botão Converter */}
           <button
             type="submit"
             className="w-full h-11 rounded-2xl bg-emerald-500 text-slate-950 font-semibold text-sm tracking-wide hover:bg-emerald-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            disabled={!amount}
+            disabled={!amount || isConverting}
           >
-            Converter
+            {isConverting ? "Converting..." : "Converter"}
           </button>
         </form>
 
@@ -319,6 +184,7 @@ export function CurrencyConverter() {
                 }).format(result)}{" "}
                 {toCurrency}
               </p>
+
               {rate !== null && (
                 <p className="text-slate-400 text-xs">
                   Rate used: 1 {fromCurrency} = {rate.toFixed(4)} {toCurrency}

@@ -1,9 +1,9 @@
+// src/App.tsx
+
 import { CurrencyConverter } from "./components/CurrencyConverter";
 
 function App() {
-  return (
-   CurrencyConverter()
-  );
+  return <CurrencyConverter />;
 }
 
 export default App;
